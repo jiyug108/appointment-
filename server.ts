@@ -111,7 +111,21 @@ app.post('/api/ocr', upload.single('image'), async (req: any, res: any) => {
 
     // Extraction logic shifted to server for better control
     const textSanitized = text.replace(/\s+/g, '');
-    const nameMatch = textSanitized.match(/姓名([^性别生日住址]{2,5})/);
+    
+    // 1. Try to find "姓名" prefix (including common misrecognitions)
+    let name = '';
+    const nameMatch = textSanitized.match(/(?:姓名|姓夕|名|姓)[:：]?([\u4e00-\u9fa5]{2,4})/);
+    
+    if (nameMatch) {
+      name = nameMatch[1];
+    } else {
+      // 2. Fallback: try characters before "性别" or "男" or "女"
+      const genderMatch = textSanitized.match(/([\u4e00-\u9fa5]{2,4})(?=性别|男|女)/);
+      if (genderMatch) {
+        name = genderMatch[1];
+      }
+    }
+
     const idMatch = textSanitized.match(/(\d{17}[\dXx])/);
     
     let birthDate = '';
@@ -122,10 +136,10 @@ app.post('/api/ocr', upload.single('image'), async (req: any, res: any) => {
 
     res.json({
       success: true,
-      name: nameMatch ? nameMatch[1].trim() : '',
+      name: name,
       idNumber: idMatch ? idMatch[0] : '',
       birthDate: birthDate,
-      raw: text // for debugging or extra fields
+      raw: text 
     });
   } catch (error) {
     if (req.file) fs.unlinkSync(req.file.path);
