@@ -15,7 +15,7 @@ import {
   MapPin,
   AlertCircle
 } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
+import { parseIdCard } from '../services/ocrService';
 
 interface Companion {
   name: string;
@@ -101,37 +101,29 @@ export default function FormPage() {
     try {
       const reader = new FileReader();
       reader.onload = async () => {
-        const base64Data = (reader.result as string).split(',')[1];
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: {
-            parts: [
-              { inlineData: { mimeType: file.type, data: base64Data } },
-              { text: "这是一个中国身份证图片。请从中解析并以 JSON 格式返回姓名(name)、身份证号码(idNumber)、出生日期(birthDate, 格式 YYYY-MM-DD)。仅返回 JSON 代码块。" }
-            ]
-          }
-        });
-
-        const text = response.text || '';
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
+        try {
+          const base64Data = (reader.result as string).split(',')[1];
+          const result = await parseIdCard(base64Data, file.type);
+          
           setFormData(prev => ({
             ...prev,
-            name: parsed.name || prev.name,
-            id_number: parsed.idNumber || prev.id_number,
-            birth_date: parsed.birthDate || prev.birth_date
+            name: result.name || prev.name,
+            id_number: result.idNumber || prev.id_number,
+            birth_date: result.birthDate || prev.birth_date
           }));
+        } catch (err) {
+          console.error('OCR Process Error:', err);
+          alert('识别失败，请确保图片清晰并手动核对');
+        } finally {
+          setIsOcrLoading(false);
         }
       };
       reader.readAsDataURL(file);
     } catch (err) {
-      console.error(err);
-      alert('OCR 识别失败，请手动录入');
-    } finally {
+      console.error('File Reader Error:', err);
+      alert('文件读取失败');
       setIsOcrLoading(false);
+    } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
