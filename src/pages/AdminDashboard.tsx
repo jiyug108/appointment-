@@ -169,6 +169,7 @@ export default function AdminDashboard() {
                     <tr className="text-[10px] uppercase font-bold text-stone-400 tracking-tighter border-b border-stone-50">
                       <th className="px-8 py-5">登记姓名</th>
                       <th className="px-8 py-5">证件与联系方式</th>
+                      <th className="px-8 py-5 text-center">交通/地点</th>
                       <th className="px-8 py-5 text-center">同行人员</th>
                       <th className="px-8 py-5 text-right">采集时间</th>
                     </tr>
@@ -187,6 +188,10 @@ export default function AdminDashboard() {
                         <td className="px-8 py-5">
                           <p className="text-xs text-stone-400">{entry.id_type}: {entry.id_number.slice(0,4)}***{entry.id_number.slice(-4)}</p>
                           <p className="text-[10px] text-stone-300 font-mono mt-0.5">{entry.phone}</p>
+                        </td>
+                        <td className="px-8 py-5 text-center">
+                          <p className="text-xs text-stone-600 font-medium">{entry.transport_type}</p>
+                          <p className="text-[9px] text-stone-400 mt-0.5 truncate max-w-[120px] mx-auto">{entry.pickup_location || entry.car_number || '-'}</p>
                         </td>
                         <td className="px-8 py-5 text-center">
                           <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold ${

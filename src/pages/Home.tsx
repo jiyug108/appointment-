@@ -17,14 +17,17 @@ export default function Home() {
 
   return (
     <div className="flex flex-col min-h-screen relative">
-      {/* Admin Entry - Floating */}
-      <button 
+      {/* Admin Portal Entry */}
+      <motion.button
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.5 }}
         onClick={() => navigate('/admin-login')}
-        className="absolute top-4 right-4 z-20 w-10 h-10 bg-white/10 hover:bg-white/30 backdrop-blur-md rounded-full flex items-center justify-center text-white/50 hover:text-white transition-all group"
-        title="Admin Portal"
+        className="fixed bottom-24 right-6 w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-stone-100 flex items-center justify-center text-stone-300 hover:text-stone-600 hover:shadow-md transition-all z-50 group shadow-sm"
+        title="管理后台"
       >
-        <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500" />
-      </button>
+        <Settings size={18} className="group-hover:rotate-45 transition-transform duration-500" />
+      </motion.button>
 
       {/* Header Image */}
       <div className="h-64 bg-natural-primary relative flex items-end p-8 overflow-hidden">

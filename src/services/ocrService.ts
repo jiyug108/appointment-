@@ -4,42 +4,122 @@ export interface IdCardInfo {
   birthDate: string;
 }
 
+let isOcrInitialized = false;
+
 /**
- * OCR 识别方案 - 调用后端 System Tesseract 引擎
- * 这种方案比 Tesseract.js 更快、更准确，且完全离线运行在服务器上。
+ * OCR 识别方案 - 使用 PaddleOCR (Paddle.js)
+ * 这比 Tesseract.js 对中文识别更准确
  */
 export async function parseIdCard(base64Data: string, mimeType: string = 'image/jpeg'): Promise<IdCardInfo> {
   try {
-    // 将 base64 转换为 Blob 然后发送
-    const byteString = atob(base64Data);
-    const ab = new ArrayBuffer(byteString.length);
-    const ia = new Uint8Array(ab);
-    for (let i = 0; i < byteString.length; i++) {
-      ia[i] = byteString.charCodeAt(i);
-    }
-    const blob = new Blob([ab], { type: mimeType });
+    // 确保 Wasm 需要的变量存在
+    (window as any).Module = (window as any).Module || {};
     
-    const formData = new FormData();
-    formData.append('image', blob, 'idcard.jpg');
+    // 动态导入以避免初始加载错误
+    const paddleOcr = await import('@paddlejs-models/ocr');
+    
+    // 获取实际的 ocr 对象 (umd 可能在 default 或者是导出的全部)
+    const ocrObj: any = (paddleOcr as any).default || paddleOcr;
 
-    const response = await fetch('/api/ocr', {
-      method: 'POST',
-      body: formData,
+    if (!isOcrInitialized) {
+      if (ocrObj.init) {
+        await ocrObj.init();
+      }
+      isOcrInitialized = true;
+    }
+
+    // 将 base64 转换为 HTMLImageElement 以供 Paddle.js 识别
+    const img = new Image();
+    img.src = `data:${mimeType};base64,${base64Data}`;
+    
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      // 超时处理
+      setTimeout(() => reject(new Error('图片加载超时')), 10000);
     });
 
-    if (!response.ok) throw new Error('OCR API failed');
+    const res = await ocrObj.recognize(img);
     
-    const result = await response.json();
+    // PaddleOCR 返回的是文本行数组
+    const textLines = res || [];
+    const fullText = textLines.join('');
+    const textSanitized = fullText.replace(/\s+/g, '');
+
+    console.log('PaddleOCR Result:', textLines);
+
+    if (textLines.length === 0) {
+      throw new Error('PaddleOCR empty result');
+    }
+
+    // 提取身份证信息
+    let name = '';
+    // 身份证姓名通常在开头，或者跟在“姓名”后面
+    // 同时也识别可能的误识，如“姓夕”
+    const nameMatch = textSanitized.match(/(?:姓名|姓夕|名|姓)[:：]?([\u4e00-\u9fa5]{2,4})/);
+    if (nameMatch) {
+      name = nameMatch[1];
+    } else {
+      // 备选方案：查找性别前的汉字
+      const genderMatch = textSanitized.match(/([\u4e00-\u9fa5]{2,4})(?=性别|男|女)/);
+      if (genderMatch) {
+        name = genderMatch[1];
+      } else if (textLines.length > 0) {
+        // 如果都没匹配到，取第一行可能是姓名（通常身份证第一行是姓名）
+        const firstLine = textLines[0].replace(/\s+/g, '');
+        if (firstLine.length >= 2 && firstLine.length <= 4 && /^[\u4e00-\u9fa5]+$/.test(firstLine)) {
+          name = firstLine;
+        }
+      }
+    }
+
+    const idMatch = textSanitized.match(/(\d{17}[\dXx])/);
+    let idNumber = idMatch ? idMatch[0] : '';
+    let birthDate = '';
     
-    if (!result.success) throw new Error(result.error || '识别失败');
+    if (idNumber) {
+      birthDate = `${idNumber.substring(6, 10)}-${idNumber.substring(10, 12)}-${idNumber.substring(12, 14)}`;
+    }
 
     return {
-      name: result.name || '',
-      idNumber: result.idNumber || '',
-      birthDate: result.birthDate || ''
+      name: name,
+      idNumber: idNumber,
+      birthDate: birthDate
     };
   } catch (error) {
-    console.error('Remote OCR Error:', error);
-    throw new Error('识别失败，请检查图片清晰度并确保服务器环境可正常运行 OCR 引擎');
+    console.error('PaddleOCR Error, falling back to Server OCR:', error);
+    // Fallback to Server OCR if Paddle.js fails
+    return fallbackToServerOcr(base64Data, mimeType);
   }
+}
+
+async function fallbackToServerOcr(base64Data: string, mimeType: string): Promise<IdCardInfo> {
+  // 将 base64 转换为 Blob 然后发送
+  const byteString = atob(base64Data);
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  const blob = new Blob([ab], { type: mimeType });
+  
+  const formData = new FormData();
+  formData.append('image', blob, 'idcard.jpg');
+
+  const response = await fetch('/api/ocr', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) throw new Error('OCR API failed');
+  
+  const result = await response.json();
+  
+  if (!result.success) throw new Error(result.error || '识别失败');
+
+  return {
+    name: result.name || '',
+    idNumber: result.idNumber || '',
+    birthDate: result.birthDate || ''
+  };
 }

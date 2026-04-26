@@ -3,6 +3,9 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+// Polyfill for PaddleOCR/Wasm issues
+(window as any).Module = (window as any).Module || {};
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
