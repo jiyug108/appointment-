@@ -28,16 +28,11 @@ FROM node:22-bullseye-slim
 
 WORKDIR /app
 
-# 运行环境安装 tsx
-RUN npm config set registry https://registry.npmmirror.com && \
-    npm install -g tsx
-
 # 从构建阶段复制产物
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.ts ./
-COPY --from=builder /app/public ./public 2>/dev/null || true
 
 # 创建持久化数据目录
 RUN mkdir -p /app/data
@@ -47,4 +42,4 @@ ENV PORT=3000
 
 EXPOSE 3000
 
-CMD ["tsx", "server.ts"]
+CMD ["npm", "start"]
