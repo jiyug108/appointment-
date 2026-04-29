@@ -112,10 +112,11 @@ export default function FormPage() {
     birth_date: '',
     gender: '男',
     remarks: '',
+    first_time_flying: false,
     transport_type: '统一大巴车',
     car_number: '',
     pickup_location: '',
-    referrer_type: '机场',
+    referrer_type: '',
     referrer_name: '',
     referrer_dept: '',
     referrer_phone: '',
@@ -148,6 +149,18 @@ export default function FormPage() {
         }
       });
   }, []);
+
+  useEffect(() => {
+    if (config?.referrer_config) {
+      if (config.referrer_config === 'airport') {
+        handleInputChange('referrer_type', '机场');
+      } else if (config.referrer_config === 'other') {
+        handleInputChange('referrer_type', '其它');
+      } else if (config.referrer_config === 'both' && !formData.referrer_type) {
+        handleInputChange('referrer_type', '机场');
+      }
+    }
+  }, [config]);
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -192,50 +205,97 @@ export default function FormPage() {
     return age >= config.min_age && age <= config.max_age;
   };
 
+  const validateIdNumber = (id: string, type: string) => {
+    const trimmedId = id.trim();
+    if (type === '身份证') {
+      return /^[0-9]{17}[0-9Xx]$/.test(trimmedId);
+    }
+    return trimmedId.length >= 5; 
+  };
+
+  const validatePhone = (phone: string) => {
+    return /^1[3-9]\d{9}$/.test(phone.trim());
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Clean data
+    const cleanedFormData = {
+      ...formData,
+      id_number: formData.id_number.trim().toUpperCase(),
+      phone: formData.phone.trim(),
+      referrer_phone: formData.referrer_phone.trim(),
+      companions: formData.companions.map(c => ({
+        ...c,
+        id_number: c.id_number.trim().toUpperCase(),
+        phone: c.phone.trim()
+      }))
+    };
+
     // Validations
-    if (!formData.name || !formData.id_number || !formData.phone || !formData.birth_date) {
+    if (!cleanedFormData.name || !cleanedFormData.id_number || !cleanedFormData.phone || !cleanedFormData.birth_date) {
       alert('请完成主要人员的所有必填信息');
       return;
     }
 
-    if (!validateAge(formData.birth_date)) {
+    if (!validateIdNumber(cleanedFormData.id_number, cleanedFormData.id_type)) {
+      alert(cleanedFormData.id_type === '身份证' ? '请输入正确的18位身份证号码' : '请输入有效的证件号码');
+      return;
+    }
+
+    if (!validatePhone(cleanedFormData.phone)) {
+      alert('请输入正确的11位手机号码');
+      return;
+    }
+
+    if (!validateAge(cleanedFormData.birth_date)) {
       alert(`主填报人年龄不在允许范围内 (${config.min_age}-${config.max_age}周岁)`);
       return;
     }
 
-    if (formData.transport_type === '自驾' && !formData.car_number) {
+    if (cleanedFormData.transport_type === '自驾' && !cleanedFormData.car_number) {
       alert('请填写车牌号码');
       return;
     }
 
-    if (config.show_referrer) {
-      if (!formData.referrer_name) {
+    if (config.referrer_config && config.referrer_config !== 'none') {
+      if (!cleanedFormData.referrer_name) {
         alert('请填写推荐人姓名');
         return;
       }
-      if (formData.referrer_type === '机场' && (!formData.referrer_dept || !formData.referrer_phone)) {
+      if (cleanedFormData.referrer_type === '机场' && (!cleanedFormData.referrer_dept || !cleanedFormData.referrer_phone)) {
         alert('请完善机场推荐人的部门及联系方式');
+        return;
+      }
+      if (cleanedFormData.referrer_type === '机场' && !validatePhone(cleanedFormData.referrer_phone)) {
+        alert('请输入正确的推荐人11位手机号码');
         return;
       }
     }
 
-    const incompleteCompanion = formData.companions.find(c => !c.name || !c.id_number || !c.phone || !c.birth_date);
+    const incompleteCompanion = cleanedFormData.companions.find(c => !c.name || !c.id_number || !c.phone || !c.birth_date);
     if (incompleteCompanion) {
       alert('所有同行人信息均为必填，请完善同行人资料');
       return;
     }
 
-    for (const comp of formData.companions) {
+    for (const comp of cleanedFormData.companions) {
+      if (!validateIdNumber(comp.id_number, comp.id_type)) {
+        alert(`${comp.name} 的证件号码格式不正确`);
+        return;
+      }
+      if (!validatePhone(comp.phone)) {
+        alert(`${comp.name} 的手机号码格式不正确 (需11位)`);
+        return;
+      }
       if (!validateAge(comp.birth_date)) {
         alert(`同行人 ${comp.name} 年龄不在允许范围内 (${config.min_age}-${config.max_age}周岁)`);
         return;
       }
     }
 
-    if (!formData.luggage_confirmed) {
+    if (!cleanedFormData.luggage_confirmed) {
       alert('请确认行李携带事项');
       return;
     }
@@ -244,7 +304,7 @@ export default function FormPage() {
       const res = await fetch('/api/enroll', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(cleanedFormData)
       });
       const data = await res.json();
       if (data.success) {
@@ -261,359 +321,487 @@ export default function FormPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <div className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-stone-50 flex items-center p-6">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-stone-400">
-          <ArrowLeft size={20} />
-        </button>
-        <h1 className="ml-2 text-sm font-bold uppercase tracking-widest text-stone-800">预约</h1>
+      <div className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-stone-100 flex items-center justify-between px-6 py-4">
+        <div className="flex items-center">
+          <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-stone-400 hover:text-natural-primary transition-colors">
+            <ArrowLeft size={20} />
+          </button>
+          <div className="ml-2">
+            <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-stone-800">服务预约</h1>
+            <p className="text-[10px] text-stone-400 font-medium tracking-tight">ENROLLMENT FORM</p>
+          </div>
+        </div>
+        <div className="w-8 h-8 rounded-full bg-natural-stone-50 flex items-center justify-center border border-stone-100">
+           <Send size={12} className="text-natural-primary" />
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-8 space-y-10 flex-1">
-        {/* Basic Info Section */}
-        <div className="space-y-6">
-          <label className="text-[11px] uppercase tracking-wider text-stone-400 font-bold block mb-4">基本人员信息</label>
+      <form onSubmit={handleSubmit} className="px-6 py-10 space-y-8 flex-1 max-w-2xl mx-auto w-full">
+        {/* Header Summary */}
+        <div className="pb-4">
+          <h2 className="text-2xl font-light text-stone-900 tracking-tight leading-tight">
+            请完善您的<span className="font-medium text-natural-primary">行程预约资料</span>
+          </h2>
+          <p className="text-xs text-stone-400 mt-2">准确的信息将有助于我们为您提供更好的出行保障</p>
+        </div>
 
-          <div className="space-y-5">
-            <div className="relative">
+        {/* Basic Info Section */}
+        <section className="bg-white rounded-[32px] p-8 shadow-sm border border-stone-50 space-y-8">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-8 h-8 rounded-xl bg-natural-stone-50 flex items-center justify-center text-natural-primary">
+              <IdCard size={18} />
+            </div>
+            <h3 className="text-sm font-bold text-stone-800 tracking-wide">基本信息</h3>
+          </div>
+
+          <div className="space-y-6">
+            <div className="group">
+              <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">姓名</label>
               <input 
                 required
                 type="text" 
                 value={formData.name}
                 onChange={(e) => handleInputChange('name', e.target.value)}
-                placeholder="姓名"
-                className="w-full border-b border-stone-200 py-3 text-sm focus:outline-none focus:border-natural-primary transition-colors bg-transparent"
+                placeholder="请输入真实姓名"
+                className="w-full border-b border-stone-200 py-3 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-300"
               />
             </div>
 
-            <div className="flex gap-4">
-              <select 
-                value={formData.id_type}
-                onChange={(e) => handleInputChange('id_type', e.target.value)}
-                className="flex-1 border-b border-stone-200 py-3 text-sm focus:outline-none bg-transparent"
-              >
-                <option value="身份证">身份证</option>
-                <option value="护照">护照</option>
-                <option value="港澳通行证">港澳通行证</option>
-              </select>
+            <div className="grid grid-cols-2 gap-6">
+              <div className="group">
+                <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">证件类型</label>
+                <select 
+                  value={formData.id_type}
+                  onChange={(e) => handleInputChange('id_type', e.target.value)}
+                  className="w-full border-b border-stone-200 py-3 text-base focus:outline-none bg-transparent appearance-none"
+                >
+                  <option value="身份证">居民身份证</option>
+                  <option value="护照">护照</option>
+                  <option value="港澳通行证">港澳通行证</option>
+                </select>
+              </div>
+              
+              <AnimatePresence>
+                {formData.id_type === '护照' && (
+                  <motion.div 
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="group"
+                  >
+                    <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-2 ml-1">性别</label>
+                    <div className="flex gap-4">
+                      {['男', '女'].map((g) => (
+                        <label key={g} className="flex items-center gap-2 cursor-pointer">
+                          <input 
+                            type="radio" 
+                            checked={formData.gender === g}
+                            onChange={() => handleInputChange('gender', g)}
+                            className="w-4 h-4 accent-natural-primary"
+                          />
+                          <span className="text-sm text-stone-600">{g}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
-            {formData.id_type === '护照' && (
-              <div className="flex gap-4">
-                <div className="flex-1 space-y-2">
-                  <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest">性别</label>
-                  <div className="flex gap-4">
-                    {['男', '女'].map((g) => (
-                      <label key={g} className="flex items-center gap-2 cursor-pointer">
-                        <input 
-                          type="radio" 
-                          checked={formData.gender === g}
-                          onChange={() => handleInputChange('gender', g)}
-                          className="w-4 h-4 accent-natural-primary"
-                        />
-                        <span className="text-sm text-stone-600">{g}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
+            <div className="group">
+              <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">证件号码</label>
+              <input 
+                required
+                type="text" 
+                value={formData.id_number}
+                onChange={(e) => handleInputChange('id_number', e.target.value)}
+                placeholder={formData.id_type === '身份证' ? "18位二代身份证" : "请输入有效证件号"}
+                maxLength={formData.id_type === '身份证' ? 18 : 30}
+                className="w-full border-b border-stone-200 py-3 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-300"
+              />
+            </div>
 
-            <input 
-              required
-              type="text" 
-              value={formData.id_number}
-              onChange={(e) => handleInputChange('id_number', e.target.value)}
-              placeholder="证件号码"
-              className="w-full border-b border-stone-200 py-3 text-sm focus:outline-none focus:border-natural-primary transition-colors bg-transparent"
-            />
-
-            <div className="grid grid-cols-1 gap-6">
+            <div className="group">
+              <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">手机号码</label>
               <input 
                 required
                 type="tel" 
                 value={formData.phone}
                 onChange={(e) => handleInputChange('phone', e.target.value)}
-                placeholder="手机号码"
-                className="w-full border-b border-stone-200 py-3 text-sm focus:outline-none focus:border-natural-primary transition-colors bg-transparent"
-              />
-              <DatePicker 
-                label="生日"
-                value={formData.birth_date}
-                onChange={(val) => handleInputChange('birth_date', val)}
+                placeholder="11位手机号"
+                maxLength={11}
+                className="w-full border-b border-stone-200 py-3 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-300"
               />
             </div>
-          </div>
-        </div>
 
-        {/* Travel Info Section */}
-        {config.transport_config !== 'none' && (
-          <div className="space-y-6 pt-6 border-t border-stone-50">
-            <label className="text-[11px] uppercase tracking-wider text-stone-400 font-bold block mb-4">出行方式</label>
-
-            <div className={`grid ${config.transport_config === 'both' ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
-              {[ 
-                { value: '统一大巴车', label: '统一大巴', icon: Bus, visible: config.transport_config === 'both' || config.transport_config === 'bus' }, 
-                { value: '自驾', label: '自驾出行', icon: Car, visible: config.transport_config === 'both' || config.transport_config === 'car' } 
-              ].filter(item => item.visible).map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  onClick={() => handleInputChange('transport_type', item.value)}
-                  className={`p-5 rounded-2xl border text-left transition-all flex items-center gap-4 ${
-                    formData.transport_type === item.value 
-                    ? 'border-natural-primary bg-natural-stone-50 ring-1 ring-natural-primary/20' 
-                    : 'border-stone-100 opacity-60'
-                  }`}
-                >
-                  <div className={`p-2 rounded-xl ${formData.transport_type === item.value ? 'bg-natural-primary text-white' : 'bg-stone-100 text-stone-400'}`}>
-                    <item.icon size={20} />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold block">{item.label}</span>
-                    <span className="text-[10px] text-stone-400 font-medium tracking-tighter uppercase">Selection</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            <AnimatePresence>
-              {formData.transport_type === '自驾' && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                >
-                  <input 
-                    type="text" 
-                    value={formData.car_number}
-                    onChange={(e) => handleInputChange('car_number', e.target.value)}
-                    placeholder="车牌号码 (如: 京A88888)"
-                    className="w-full border-b border-stone-200 py-3 text-sm focus:outline-none focus:border-natural-primary transition-colors bg-transparent"
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {config.show_pickup && config.pickup_locations && (
-              <div className="space-y-3">
-                <span className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">上车地点</span>
-                <div className="flex flex-wrap gap-2">
-                  {config.pickup_locations.split(',').map((loc: string) => (
+            <div className="pt-8 mb-4">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-1.5 h-4 bg-natural-primary rounded-full" />
+                <span className="text-[11px] text-stone-500 font-bold uppercase tracking-widest">飞行业务确认</span>
+              </div>
+              <div className="space-y-4 bg-natural-stone-50/50 p-6 rounded-2xl border border-stone-100">
+                <span className="text-xs font-bold text-stone-800 block">您是否是第一次乘坐飞机出行？</span>
+                <div className="flex gap-4">
+                  {[
+                    { value: true, label: '是，这是我第一次飞' },
+                    { value: false, label: '否，我曾有过飞行经验' }
+                  ].map((opt) => (
                     <button
-                      key={loc}
+                      key={opt.label}
                       type="button"
-                      onClick={() => handleInputChange('pickup_location', loc)}
-                      className={`px-4 py-2 rounded-full text-xs font-medium border transition-all ${
-                        formData.pickup_location === loc
-                        ? 'bg-natural-dark text-white border-natural-dark'
-                        : 'bg-white text-stone-500 border-stone-100'
+                      onClick={() => handleInputChange('first_time_flying', opt.value)}
+                      className={`flex-1 py-4 px-2 rounded-xl border text-[11px] font-bold transition-all duration-300 transform active:scale-95 ${
+                        formData.first_time_flying === opt.value 
+                        ? 'border-natural-primary bg-natural-primary text-white shadow-lg shadow-natural-primary/20 scale-[1.02]' 
+                        : 'border-white bg-white text-stone-400 shadow-sm hover:border-stone-200'
                       }`}
                     >
-                      {loc}
+                      {opt.label}
                     </button>
                   ))}
                 </div>
               </div>
-            )}
-
-            <div 
-              onClick={() => handleInputChange('luggage_confirmed', !formData.luggage_confirmed)}
-              className={`flex items-center gap-4 p-5 rounded-3xl cursor-pointer border transition-all ${
-                formData.luggage_confirmed ? 'bg-natural-stone-50 border-natural-primary' : 'bg-stone-50 border-stone-100'
-              }`}
-            >
-              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                formData.luggage_confirmed ? 'bg-natural-primary border-natural-primary text-white' : 'border-stone-300'
-              }`}>
-                {formData.luggage_confirmed && <Plus size={14} className="rotate-45" />}
-              </div>
-              <div className="flex-1">
-                <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">行李确认</p>
-                <p className="text-xs font-medium text-stone-700">我已知晓当天需自备行李箱</p>
-              </div>
             </div>
+
+            <DatePicker 
+              label="出生日期"
+              value={formData.birth_date}
+              onChange={(val) => handleInputChange('birth_date', val)}
+            />
           </div>
-        )}
+        </section>
 
-        {/* Referrer Section */}
-        {!!config.show_referrer && (
-          <div className="space-y-6 pt-6 border-t border-stone-50">
-            <label className="text-[11px] uppercase tracking-wider text-stone-400 font-bold block mb-4">推荐人信息</label>
-            
-            <div className="flex gap-4 mb-6">
-              {['机场', '其它'].map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => handleInputChange('referrer_type', type)}
-                  className={`flex-1 py-3 rounded-xl border text-xs font-bold transition-all ${
-                    formData.referrer_type === type 
-                    ? 'border-natural-primary bg-natural-stone-50 text-natural-primary' 
-                    : 'border-stone-100 text-stone-400'
-                  }`}
-                >
-                  {type}
-                </button>
-              ))}
+        {/* Travel Info Section */}
+        {config.transport_config !== 'none' && (
+          <section className="bg-white rounded-[32px] p-8 shadow-sm border border-stone-50 space-y-8">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-8 h-8 rounded-xl bg-natural-stone-50 flex items-center justify-center text-natural-primary">
+                <Bus size={18} />
+              </div>
+              <h3 className="text-sm font-bold text-stone-800 tracking-wide">出行方式</h3>
             </div>
 
-            <div className="space-y-4">
-              <input 
-                type="text" 
-                value={formData.referrer_name}
-                onChange={(e) => handleInputChange('referrer_name', e.target.value)}
-                placeholder="推荐人姓名"
-                className="w-full border-b border-stone-200 py-3 text-sm focus:outline-none focus:border-natural-primary transition-colors bg-transparent"
-              />
-              
+            <div className="space-y-6">
+              <div className={`grid ${config.transport_config === 'both' ? 'grid-cols-2' : 'grid-cols-1'} gap-4`}>
+                {[ 
+                  { value: '统一大巴车', label: '统一大巴', icon: Bus, visible: config.transport_config === 'both' || config.transport_config === 'bus' }, 
+                  { value: '自驾', label: '自驾出行', icon: Car, visible: config.transport_config === 'both' || config.transport_config === 'car' } 
+                ].filter(item => item.visible).map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => handleInputChange('transport_type', item.value)}
+                    className={`p-6 rounded-[24px] border text-left transition-all relative overflow-hidden group ${
+                      formData.transport_type === item.value 
+                      ? 'border-natural-primary bg-natural-stone-50 ring-2 ring-natural-primary/10' 
+                      : 'border-stone-100 hover:border-stone-200'
+                    }`}
+                  >
+                    <div className={`w-10 h-10 rounded-xl mb-3 flex items-center justify-center transition-colors ${formData.transport_type === item.value ? 'bg-natural-primary text-white' : 'bg-stone-50 text-stone-300'}`}>
+                      <item.icon size={20} />
+                    </div>
+                    <div>
+                      <span className={`text-xs font-bold block mb-0.5 ${formData.transport_type === item.value ? 'text-stone-800' : 'text-stone-400 group-hover:text-stone-500'}`}>{item.label}</span>
+                      <span className="text-[10px] text-stone-300 font-medium tracking-tight uppercase">TRANSPORTATION</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
               <AnimatePresence>
-                {formData.referrer_type === '机场' && (
+                {formData.transport_type === '自驾' && (
                   <motion.div
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: 'auto', opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
-                    className="space-y-4 overflow-hidden"
+                    className="overflow-hidden"
                   >
-                    <input 
-                      type="text" 
-                      value={formData.referrer_dept}
-                      onChange={(e) => handleInputChange('referrer_dept', e.target.value)}
-                      placeholder="部门"
-                      className="w-full border-b border-stone-200 py-3 text-sm focus:outline-none focus:border-natural-primary transition-colors bg-transparent"
-                    />
-                    <input 
-                      type="tel" 
-                      value={formData.referrer_phone}
-                      onChange={(e) => handleInputChange('referrer_phone', e.target.value)}
-                      placeholder="联系方式"
-                      className="w-full border-b border-stone-200 py-3 text-sm focus:outline-none focus:border-natural-primary transition-colors bg-transparent"
-                    />
+                    <div className="group">
+                      <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">车牌号码</label>
+                      <input 
+                        type="text" 
+                        value={formData.car_number}
+                        onChange={(e) => handleInputChange('car_number', e.target.value)}
+                        placeholder="例：蒙H88888"
+                        className="w-full border-b border-stone-200 py-3 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-300 uppercase"
+                      />
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              {config.show_pickup && config.pickup_locations && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-stone-400 font-bold uppercase tracking-widest">上车地点选择</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {config.pickup_locations.split(',').map((loc: string) => (
+                      <button
+                        key={loc}
+                        type="button"
+                        onClick={() => handleInputChange('pickup_location', loc)}
+                        className={`px-5 py-2.5 rounded-full text-xs font-semibold border transition-all duration-300 ${
+                          formData.pickup_location === loc
+                          ? 'bg-natural-dark text-white border-natural-dark shadow-md'
+                          : 'bg-stone-50 text-stone-400 border-transparent hover:bg-stone-100 hover:text-stone-600'
+                        }`}
+                      >
+                        {loc}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div 
+                onClick={() => handleInputChange('luggage_confirmed', !formData.luggage_confirmed)}
+                className={`flex items-start gap-4 p-6 rounded-[24px] cursor-pointer border transition-all duration-300 ${
+                  formData.luggage_confirmed ? 'bg-natural-stone-50 border-natural-primary ring-2 ring-natural-primary/5' : 'bg-stone-50/50 border-stone-100 grayscale-[0.5]'
+                }`}
+              >
+                <div className={`mt-0.5 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
+                  formData.luggage_confirmed ? 'bg-natural-primary border-natural-primary text-white rounded-[6px]' : 'border-stone-300'
+                }`}>
+                  {formData.luggage_confirmed && <Plus size={16} className="rotate-45" />}
+                </div>
+                <div className="flex-1">
+                  <p className={`text-xs font-bold transition-colors ${formData.luggage_confirmed ? 'text-stone-800' : 'text-stone-400'}`}>自备行李箱确认</p>
+                  <p className="text-[10px] text-stone-400 mt-1 leading-relaxed">本人已知晓活动当天需自备20寸及以上行李箱作为拍摄/活动道具</p>
+                </div>
+              </div>
             </div>
-          </div>
+          </section>
+        )}
+
+        {/* Referrer Section */}
+        {config.referrer_config && config.referrer_config !== 'none' && (
+          <section className="bg-white rounded-[32px] p-8 shadow-sm border border-stone-50 space-y-8">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-8 h-8 rounded-xl bg-natural-stone-50 flex items-center justify-center text-natural-primary">
+                <Phone size={18} />
+              </div>
+              <h3 className="text-sm font-bold text-stone-800 tracking-wide">推荐人信息</h3>
+            </div>
+
+            <div className="space-y-6">
+              {config.referrer_config === 'both' && (
+                <div className="flex p-1.5 bg-stone-50 rounded-2xl gap-2">
+                  {['机场', '其它'].map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => handleInputChange('referrer_type', type)}
+                      className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all duration-300 ${
+                        formData.referrer_type === type 
+                        ? 'bg-white text-natural-primary shadow-sm' 
+                        : 'text-stone-400 hover:text-stone-500'
+                      }`}
+                    >
+                      {type} 推荐
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-6">
+                <div className="group">
+                  <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">推荐人姓名</label>
+                  <input 
+                    type="text" 
+                    value={formData.referrer_name}
+                    onChange={(e) => handleInputChange('referrer_name', e.target.value)}
+                    placeholder="请输入推荐人姓名"
+                    className="w-full border-b border-stone-200 py-3 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-300"
+                  />
+                </div>
+                
+                <AnimatePresence>
+                  {(config.referrer_config === 'airport' || (config.referrer_config === 'both' && formData.referrer_type === '机场')) && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="space-y-6 overflow-hidden"
+                    >
+                      <div className="group">
+                        <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">推荐人部门</label>
+                        <input 
+                          type="text" 
+                          value={formData.referrer_dept}
+                          onChange={(e) => handleInputChange('referrer_dept', e.target.value)}
+                          placeholder="请输入推荐人所属部门"
+                          className="w-full border-b border-stone-200 py-3 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-300"
+                        />
+                      </div>
+                      <div className="group">
+                        <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">推荐人联系方式</label>
+                        <input 
+                          type="tel" 
+                          value={formData.referrer_phone}
+                          onChange={(e) => handleInputChange('referrer_phone', e.target.value)}
+                          placeholder="请输入其11位手机号码"
+                          maxLength={11}
+                          className="w-full border-b border-stone-200 py-3 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-300"
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          </section>
         )}
 
         {/* Remarks Section */}
-        <div className="space-y-4 pt-6 border-t border-stone-50">
-          <label className="text-[11px] uppercase tracking-wider text-stone-400 font-bold block">备注信息</label>
+        <section className="bg-white rounded-[32px] p-8 shadow-sm border border-stone-50 space-y-4">
+          <label className="text-[11px] uppercase tracking-wider text-stone-500 font-bold block font-sans">其他特别说明 (选填)</label>
           <textarea 
             value={formData.remarks}
             onChange={(e) => handleInputChange('remarks', e.target.value)}
-            placeholder="如有其他特殊需求或说明，请在此输入..."
-            className="w-full h-24 p-4 bg-stone-50 rounded-2xl text-sm border-none focus:ring-1 focus:ring-natural-primary outline-none transition-all resize-none"
+            placeholder="如有其他特殊需求或随行说明，请在此输入..."
+            className="w-full h-32 p-5 bg-stone-50/50 rounded-2xl text-sm border border-stone-100 focus:ring-1 focus:ring-natural-primary outline-none transition-all resize-none placeholder:text-stone-300"
           />
-        </div>
+        </section>
 
         {/* Companions Section */}
-        <div className="space-y-6 pt-6 border-t border-stone-50">
-          <div className="flex justify-between items-center mb-4">
-            <label className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">
-              同行人 ({formData.companions.length})
-            </label>
+        <section className="space-y-6">
+          <div className="flex justify-between items-center px-2">
+            <div className="flex items-center gap-2">
+              <Plus size={16} className="text-natural-primary" />
+              <label className="text-[11px] uppercase tracking-[0.2em] text-stone-500 font-bold">
+                同行人资料 ({formData.companions.length})
+              </label>
+            </div>
             <button 
               type="button"
               onClick={addCompanion}
-              className="text-[10px] text-natural-accent font-bold uppercase tracking-widest hover:opacity-70"
+              className="px-4 py-2 bg-white rounded-full border border-stone-200 text-[10px] text-natural-primary font-bold uppercase tracking-widest hover:bg-natural-stone-50 transition-all shadow-sm active:scale-95"
             >
-              + 新增成员
+              + 新增随行人员
             </button>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-6">
             {formData.companions.map((comp, idx) => (
               <motion.div 
                 key={idx}
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-5 bg-natural-stone-50 rounded-[32px] border border-stone-100 relative group"
+                className="p-8 bg-white rounded-[40px] border border-stone-100 relative shadow-sm"
               >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-[10px] font-bold text-natural-primary border border-stone-100">
+                <div className="flex items-center justify-between mb-8 border-b border-stone-50 pb-4">
+                  <div className="flex items-center gap-3">
+                    <span className="w-8 h-8 rounded-full bg-natural-primary flex items-center justify-center text-xs font-bold text-white">
                       {idx + 1}
                     </span>
-                    <span className="text-[10px] font-bold text-stone-400 uppercase tracking-tighter">Companion Member</span>
+                    <div>
+                      <span className="text-[10px] font-bold text-stone-800 uppercase tracking-widest block">Companion</span>
+                      <span className="text-[9px] text-stone-300 uppercase tracking-tighter">Sub-Profile</span>
+                    </div>
                   </div>
                   <button 
                     type="button"
                     onClick={() => removeCompanion(idx)}
-                    className="text-stone-300 hover:text-natural-accent transition-colors"
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-stone-300 hover:text-natural-accent hover:bg-natural-stone-50 transition-all"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={18} />
                   </button>
                 </div>
                 
-                <div className="grid gap-4">
-                  <input 
-                    required
-                    type="text" 
-                    value={comp.name}
-                    onChange={(e) => updateCompanion(idx, 'name', e.target.value)}
-                    placeholder="成员姓名 (必填)"
-                    className="w-full bg-white/50 border-b border-stone-200 py-2 px-1 text-sm focus:outline-none focus:border-natural-primary transition-colors"
-                  />
-                  <div className="grid grid-cols-2 gap-4">
-                    <select 
-                      value={comp.id_type}
-                      onChange={(e) => updateCompanion(idx, 'id_type', e.target.value)}
-                      className="bg-transparent border-b border-stone-200 py-2 text-sm focus:outline-none"
-                    >
-                      <option value="身份证">身份证</option>
-                      <option value="护照">护照</option>
-                      <option value="港澳通行证">港澳通行证</option>
-                    </select>
+                <div className="space-y-6">
+                   <div className="group">
+                    <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">姓名</label>
+                    <input 
+                      required
+                      type="text" 
+                      value={comp.name}
+                      onChange={(e) => updateCompanion(idx, 'name', e.target.value)}
+                      className="w-full border-b border-stone-200 py-2 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-200"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="group">
+                      <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">证件类型</label>
+                      <select 
+                        value={comp.id_type}
+                        onChange={(e) => updateCompanion(idx, 'id_type', e.target.value)}
+                        className="w-full border-b border-stone-200 py-2 text-base focus:outline-none bg-transparent appearance-none"
+                      >
+                        <option value="身份证">身份证</option>
+                        <option value="护照">护照</option>
+                        <option value="港澳通行证">港澳通行证</option>
+                      </select>
+                    </div>
                     {comp.id_type === '护照' && (
-                      <div className="flex gap-4 items-center">
-                        {['男', '女'].map((g) => (
-                          <label key={g} className="flex items-center gap-2 cursor-pointer">
-                            <input 
-                              type="radio" 
-                              checked={comp.gender === g}
-                              onChange={() => updateCompanion(idx, 'gender', g)}
-                              className="w-3 h-3 accent-natural-primary"
-                            />
-                            <span className="text-xs text-stone-600">{g}</span>
-                          </label>
-                        ))}
+                      <div className="group">
+                        <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-2 ml-1">性别</label>
+                        <div className="flex gap-4">
+                          {['男', '女'].map((g) => (
+                            <label key={g} className="flex items-center gap-2 cursor-pointer">
+                              <input 
+                                type="radio" 
+                                checked={comp.gender === g}
+                                onChange={() => updateCompanion(idx, 'gender', g)}
+                                className="w-3 h-3 accent-natural-primary"
+                              />
+                              <span className="text-xs text-stone-600">{g}</span>
+                            </label>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
+
+                  <div className="group">
+                    <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">证件号码</label>
+                    <input 
+                      required
+                      type="text" 
+                      value={comp.id_number}
+                      onChange={(e) => updateCompanion(idx, 'id_number', e.target.value)}
+                      placeholder={comp.id_type === '身份证' ? "18位号码" : "证件号"}
+                      className="w-full border-b border-stone-200 py-2 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-200"
+                    />
+                  </div>
+
+                  <div className="group">
+                    <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block mb-1 ml-1 group-focus-within:text-natural-primary transition-colors">联系方式</label>
+                    <input 
+                      required
+                      type="tel" 
+                      value={comp.phone}
+                      onChange={(e) => updateCompanion(idx, 'phone', e.target.value)}
+                      placeholder="11位手机号"
+                      maxLength={11}
+                      className="w-full border-b border-stone-200 py-2 text-base focus:outline-none focus:border-natural-primary transition-colors bg-transparent placeholder:text-stone-200"
+                    />
+                  </div>
+
                   <DatePicker 
-                    label="生日"
+                    label="生日日期"
                     value={comp.birth_date}
                     onChange={(val) => updateCompanion(idx, 'birth_date', val)}
-                  />
-                  <input 
-                    required
-                    type="text" 
-                    value={comp.id_number}
-                    onChange={(e) => updateCompanion(idx, 'id_number', e.target.value)}
-                    placeholder="成员证件号 (必填)"
-                    className="w-full bg-white/50 border-b border-stone-200 py-2 px-1 text-sm focus:outline-none focus:border-natural-primary transition-colors"
-                  />
-                  <input 
-                    required
-                    type="tel" 
-                    value={comp.phone}
-                    onChange={(e) => updateCompanion(idx, 'phone', e.target.value)}
-                    placeholder="联系电话 (必填)"
-                    className="w-full bg-white/50 border-b border-stone-200 py-2 px-1 text-sm focus:outline-none focus:border-natural-primary transition-colors"
                   />
                 </div>
               </motion.div>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div className="p-5 bg-[#FAF9F5] rounded-3xl flex gap-3 items-start border border-stone-100">
-          <AlertCircle size={16} className="text-natural-accent mt-0.5 shrink-0" />
-          <p className="text-[10px] text-stone-500 leading-normal">
-            信息仅用于活动投保与统计。数据传输已加密，系统严格遵守隐私政策。
-          </p>
+        <div className="p-8 bg-stone-900 rounded-[32px] flex gap-4 items-start border border-black shadow-xl">
+          <div className="p-2 bg-natural-primary/20 rounded-full">
+            <AlertCircle size={16} className="text-natural-primary" />
+          </div>
+          <div className="flex-1">
+             <p className="text-[10px] font-bold text-white uppercase tracking-widest mb-1">隐私与服务条款</p>
+             <p className="text-[10px] text-stone-400 leading-relaxed">
+              预约信息仅用于本次民航研学活动投保与统计。数据传输已通过 256 位加密处理。提交即代表您同意本平台的个人信息保护政策。
+            </p>
+          </div>
         </div>
       </form>
+
 
       {/* Submit Button */}
       <div className="sticky bottom-0 p-6 bg-white/80 backdrop-blur-md border-t border-stone-50 mt-auto">

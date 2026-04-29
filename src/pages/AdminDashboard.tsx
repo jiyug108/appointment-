@@ -437,22 +437,32 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block">推荐人信息配置</label>
-                    <label className="flex items-center gap-3 cursor-pointer group">
-                      <div className={`w-5 h-5 rounded-md border-2 transition-colors ${config.show_referrer ? 'bg-natural-primary border-natural-primary' : 'border-stone-200'}`}>
-                        {!!config.show_referrer && <div className="w-full h-full flex items-center justify-center text-white"><Check size={12} /></div>}
-                      </div>
-                      <input 
-                        type="checkbox" 
-                        checked={!!config.show_referrer}
-                        onChange={(e) => setConfig({...config, show_referrer: e.target.checked})}
-                        className="hidden"
-                      />
-                      <span className="text-xs font-medium text-stone-600">启用推荐人信息填报</span>
-                    </label>
+                  <label className="text-[10px] uppercase font-bold text-stone-400 tracking-widest block">推荐人信息配置</label>
+                  <div className="flex flex-wrap gap-6">
+                    {[
+                      { value: 'none', label: '不启用' },
+                      { value: 'airport', label: '仅显示机场' },
+                      { value: 'other', label: '仅显示其它' },
+                      { value: 'both', label: '显示两者' }
+                    ].map((opt) => (
+                      <label key={opt.value} className="flex items-center gap-2 cursor-pointer group">
+                        <input 
+                          type="radio" 
+                          name="referrer_config"
+                          checked={config.referrer_config === opt.value}
+                          onChange={() => setConfig({...config, referrer_config: opt.value})}
+                          className="w-4 h-4 accent-natural-primary"
+                        />
+                        <span className="text-xs font-medium text-stone-600">{opt.label}</span>
+                      </label>
+                    ))}
                   </div>
-                  {!config.show_referrer && (
+                  {config.referrer_config !== 'none' ? (
+                    <p className="text-[10px] text-stone-300 mt-2 italic flex items-center gap-2">
+                       <Check size={12} className="text-natural-primary" />
+                       已启用推荐人填报 {config.referrer_config === 'airport' ? '(仅限机场推荐人)' : config.referrer_config === 'other' ? '(仅限其它推荐人)' : ''}
+                    </p>
+                  ) : (
                     <p className="text-[10px] text-stone-300 bg-stone-50 p-4 rounded-xl italic">
                       推荐人信息功能已禁用，填报页面将不会展示相关选项。
                     </p>

@@ -30,6 +30,7 @@ db.exec(`
     show_pickup BOOLEAN,
     pickup_locations TEXT,
     show_referrer BOOLEAN DEFAULT 0,
+    referrer_config TEXT DEFAULT 'none',
     max_companions INTEGER,
     start_date DATE,
     end_date DATE,
@@ -44,10 +45,11 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
     id_type TEXT,
-    id_number TEXT,
+    id_number TEXT UNIQUE,
     phone TEXT,
     birth_date TEXT,
     gender TEXT,
+    first_time_flying BOOLEAN DEFAULT 0,
     transport_type TEXT,
     car_number TEXT,
     pickup_location TEXT,
@@ -88,8 +90,10 @@ addColumn('config', 'max_registrations', 'INTEGER');
 addColumn('config', 'min_age', 'INTEGER DEFAULT 18');
 addColumn('config', 'max_age', 'INTEGER DEFAULT 60');
 addColumn('config', 'show_referrer', 'BOOLEAN DEFAULT 0');
+addColumn('config', 'referrer_config', 'TEXT DEFAULT "none"');
 addColumn('config', 'is_active', 'BOOLEAN DEFAULT 1');
 addColumn('entries', 'gender', 'TEXT');
+addColumn('entries', 'first_time_flying', 'BOOLEAN DEFAULT 0');
 addColumn('entries', 'remarks', 'TEXT');
 addColumn('entries', 'referrer_type', 'TEXT');
 addColumn('entries', 'referrer_name', 'TEXT');
@@ -104,6 +108,7 @@ const defaultConfig = {
   bg_image: 'https://images.unsplash.com/photo-1530521954074-e64f6810b32d?auto=format&fit=crop&q=80&w=1200',
   pickup_locations: '航站楼P1停车场,机场大巴换乘中心,地铁盛乐机场站',
   transport_config: 'both',
+  referrer_config: 'none',
   show_pickup: 1,
   is_active: 1,
   max_companions: 3,
@@ -116,8 +121,8 @@ const defaultConfig = {
 
 // We use INSERT OR REPLACE to force the update of the first config entry
 db.prepare(`
-  INSERT OR REPLACE INTO config (id, title, description, bg_image, transport_config, show_pickup, pickup_locations, show_referrer, is_active, max_companions, start_date, end_date, max_registrations, min_age, max_age)
-  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT OR REPLACE INTO config (id, title, description, bg_image, transport_config, show_pickup, pickup_locations, show_referrer, referrer_config, is_active, max_companions, start_date, end_date, max_registrations, min_age, max_age)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `).run(
   defaultConfig.title, 
   defaultConfig.description, 
@@ -126,6 +131,7 @@ db.prepare(`
   defaultConfig.show_pickup, 
   defaultConfig.pickup_locations, 
   0,
+  defaultConfig.referrer_config,
   defaultConfig.is_active,
   defaultConfig.max_companions,
   defaultConfig.start_date,
@@ -144,38 +150,53 @@ app.get('/api/config', (req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
-  const { title, description, bg_image, transport_config, show_pickup, pickup_locations, show_referrer, is_active, max_companions, start_date, end_date, max_registrations, min_age, max_age } = req.body;
+  const { title, description, bg_image, transport_config, show_pickup, pickup_locations, show_referrer, referrer_config, is_active, max_companions, start_date, end_date, max_registrations, min_age, max_age } = req.body;
   db.prepare(`
     UPDATE config SET 
       title = ?, description = ?, bg_image = ?, 
       transport_config = ?, show_pickup = ?, 
       pickup_locations = ?, show_referrer = ?, 
+      referrer_config = ?,
       is_active = ?, max_companions = ?,
       start_date = ?, end_date = ?, max_registrations = ?,
       min_age = ?, max_age = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = 1
-  `).run(title, description, bg_image, transport_config, show_pickup ? 1 : 0, pickup_locations, show_referrer ? 1 : 0, is_active ? 1 : 0, max_companions, start_date, end_date, max_registrations, min_age, max_age);
+  `).run(title, description, bg_image, transport_config, show_pickup ? 1 : 0, pickup_locations, show_referrer ? 1 : 0, referrer_config || 'none', is_active ? 1 : 0, max_companions, start_date, end_date, max_registrations, min_age, max_age);
   res.json({ success: true });
 });
 
 app.post('/api/enroll', (req, res) => {
   const { 
     name, id_type, id_number, phone, birth_date, gender, remarks,
+    first_time_flying,
     transport_type, car_number, pickup_location, luggage_confirmed,
     referrer_type, referrer_name, referrer_dept, referrer_phone,
     companions 
   } = req.body;
 
+  // Duplicate check (Check both main entries and companions)
+  const idNumbers = [id_number, ...(companions?.map((c: any) => c.id_number) || [])];
+  
+  for (const id of idNumbers) {
+    const mainDuplicate = db.prepare('SELECT id FROM entries WHERE id_number=?').get(id);
+    const compDuplicate = db.prepare('SELECT id FROM companions WHERE id_number=?').get(id);
+    if (mainDuplicate || compDuplicate) {
+      return res.status(400).json({ error: `证件号 ${id} 已报名，请勿重复提交` });
+    }
+  }
+
   const transaction = db.transaction(() => {
     const result = db.prepare(`
       INSERT INTO entries (
         name, id_type, id_number, phone, birth_date, gender, remarks,
+        first_time_flying,
         transport_type, car_number, pickup_location, luggage_confirmed,
         referrer_type, referrer_name, referrer_dept, referrer_phone
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name, id_type, id_number, phone, birth_date, gender, remarks || '', 
+      first_time_flying ? 1 : 0,
       transport_type, car_number, pickup_location, luggage_confirmed ? 1 : 0,
       referrer_type, referrer_name, referrer_dept, referrer_phone
     );
@@ -240,6 +261,7 @@ app.get('/api/export', (req, res) => {
       '类型': '主填报人',
       '姓名': entry.name,
       '性别': entry.gender || '-',
+      '是否第一次乘坐飞机': entry.first_time_flying ? '是' : '否',
       '证件类型': entry.id_type,
       '证件号': entry.id_number,
       '手机号': entry.phone,
