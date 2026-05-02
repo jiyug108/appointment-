@@ -112,7 +112,7 @@ export default function FormPage() {
     birth_date: '',
     gender: '男',
     remarks: '',
-    first_time_flying: false,
+    first_time_flying: null as boolean | null,
     transport_type: '统一大巴车',
     car_number: '',
     pickup_location: '',
@@ -265,6 +265,11 @@ export default function FormPage() {
         alert('请输入正确的推荐人11位手机号码');
         return;
       }
+    }
+
+    if (cleanedFormData.first_time_flying === null) {
+      alert('请选择您是否是第一次乘坐飞机');
+      return;
     }
 
     const incompleteCompanion = cleanedFormData.companions.find(c => !c.name || !c.id_number || !c.phone || !c.birth_date);
